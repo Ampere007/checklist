@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Python / Backend
+*.pt
+venv/
+__pycache__/
+*.pyc
+
+# Data, Uploads & Results (แนะนำให้เพิ่ม)
+backend/grabcut_processing/
+backend/processed_results/
+backend/processing/
+backend/segmented_cells/
+backend/uploads/
+
+# Node / Frontend
+frontend/node_modules
+frontend/build
+
+# Other
+.env
