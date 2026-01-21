@@ -1,35 +1,41 @@
-# image_processor.py
 import cv2
 import numpy as np
+from PIL import Image
 
-def detect_combined_edges(cell_image):
+def preprocess_image_with_mask(image_path):
     """
-    ฟังก์ชันสำหรับทำ Edge Detection
-    - รับภาพเซลล์ (BGR) เข้ามา 1 ภาพ
-    - คืนค่าเป็นภาพเส้นขอบ (ขาว-ดำ) ที่รวมขอบของ Chromatin และ Cell แล้ว
+    ฟังก์ชันสำหรับอ่านรูปภาพและทำ Circular Masking (วงกลมดำ)
+    ✨ ปรับปรุงใหม่: ใช้รัศมี 90% ของด้านที่ยาวที่สุด เพื่อให้กระชับขึ้น
+       แต่ยังคงครอบคลุมลักษณะสำคัญของเซลล์ได้ดี
     """
-    if cell_image is None:
-        return None
-
-    # === ส่วนที่ 1: หาขอบของ Chromatin ===
-    hsv = cv2.cvtColor(cell_image, cv2.COLOR_BGR2HSV)
-    lower_purple = np.array([140, 110, 50])
-    upper_purple = np.array([175, 255, 220])
-
-    mask = cv2.inRange(hsv, lower_purple, upper_purple)
-    kernel = np.ones((3,3), np.uint8)
-    mask_cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # 1. อ่านรูปด้วย OpenCV
+    img = cv2.imread(image_path)
     
-    # ใช้ Canny กับ mask จะให้ผลลัพธ์ที่ดีและเร็วกว่า
-    chromatin_edges = cv2.Canny(mask_cleaned, 100, 200)
+    # กรณีไฟล์เสียหรืออ่านไม่ได้ ให้คืนค่าเดิมผ่าน PIL
+    if img is None:
+        try:
+            return Image.open(image_path).convert('RGB')
+        except:
+            return None
 
-    # === ส่วนที่ 2: หาขอบของเซลล์เม็ดเลือดแดง ===
-    gray_cell = cv2.cvtColor(cell_image, cv2.COLOR_BGR_GRAY)
-    _, cell_mask = cv2.threshold(gray_cell, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    cell_edges = cv2.Canny(cell_mask, 100, 200)
+    h, w, c = img.shape
+    
+    # 2. สร้างหน้ากากวงกลม (Circular Mask)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    center = (int(w/2), int(h/2))
+    
+    # ✨ [แก้ไขจุดสำคัญ] ✨
+    # ใช้ด้านที่ยาวที่สุดเป็นเกณฑ์ (max(h, w)) แล้วคูณด้วย 0.9 (90%)
+    # เพื่อให้วงกลมเล็กลงกว่าขอบรูปเล็กน้อย แต่ยังกว้างพอสำหรับเซลล์ส่วนใหญ่
+    radius = int((max(h, w) / 2) * 0.9) 
+    
+    cv2.circle(mask, center, radius, (255), thickness=-1)
 
-    # === ส่วนที่ 3: รวมขอบทั้งสองอย่างเข้าด้วยกัน ===
-    combined_edges = cv2.bitwise_or(chromatin_edges, cell_edges)
-
-    return combined_edges
+    # 3. ตัดพื้นหลัง (Bitwise AND)
+    masked_img = cv2.bitwise_and(img, img, mask=mask)
+    
+    # 4. แปลงสีจาก BGR เป็น RGB
+    masked_img = cv2.cvtColor(masked_img, cv2.COLOR_BGR2RGB)
+    
+    # 5. แปลงเป็น PIL Image
+    return Image.fromarray(masked_img)
