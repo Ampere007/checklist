@@ -10,8 +10,6 @@ from collections import Counter
 from cellpose_segmenter import segment_and_save_cells, filter_bad_cells
 from image_processor import preprocess_image_with_mask
 from model_loader import load_resnet_model, predict_image_file 
-
-# ✨ Import Algorithm วัดขนาด
 from algoritum.findsize import process_folder_sizes
 
 app = Flask(__name__)
@@ -28,12 +26,20 @@ for folder in [UPLOAD_FOLDER, SEGMENTED_FOLDER, PROCESSED_FOLDER]:
 # --- 1. Load ResNet-50 Model ---
 print("🚀 Loading System...")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, 'model', 'best_resnet-50_new_start.pth')
+
+# ⚠️ เช็ค Path ให้ดี
+MODEL_PATH = os.path.join(BASE_DIR, 'model', 'best_resnet-50_new_start.pth') 
+
 CLASS_NAMES = ['1chromatin', 'band form', 'basket form', 'nomal_cell', 'schuffner dot'] 
 
+# เรียกใช้ฟังก์ชันจาก model_loader.py
 model, device = load_resnet_model(MODEL_PATH, num_classes=len(CLASS_NAMES))
 
-# --- Routes สำหรับรูปภาพ ---
+# --- Routes ---
+
+@app.route('/uploads/<path:filename>')
+def send_uploaded_image(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/cells/<path:path>')
 def send_cell_image(path): 
@@ -52,35 +58,28 @@ def analyze_image():
     filepath = None
     try:
         unique_id = str(uuid.uuid4())
-        filepath = os.path.join(UPLOAD_FOLDER, unique_id + os.path.splitext(file.filename)[1])
+        filename = unique_id + os.path.splitext(file.filename)[1]
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
         
-        # --- STEP 1: Segment ---
+        # 1. Segmentation
         print(f"1️⃣ Running Cellpose Segmentation...")
-        raw_cell_paths = segment_and_save_cells(filepath)
+        raw_cells_data = segment_and_save_cells(filepath)
         
-        if not raw_cell_paths: 
+        if not raw_cells_data: 
             return jsonify({'message': 'Cellpose found no cells.'})
         
-        # --- STEP 2: Filter ---
+        # 2. Filtering
         print(f"2️⃣ Filtering cells...")
-        cropped_cell_paths = filter_bad_cells(raw_cell_paths)
+        valid_cells_data = filter_bad_cells(raw_cells_data)
         
-        if not cropped_cell_paths:
+        if not valid_cells_data:
              return jsonify({'message': 'All cells were filtered out.'})
 
-        # --- STEP 3: Masking (❌ ปิดส่วนนี้ เพื่อรักษาภาพ Original ไว้) ---
-        # print("🎨 Applying circular mask...")
-        # for cell_path in cropped_cell_paths:
-        #     masked_img = preprocess_image_with_mask(cell_path)
-        #     if masked_img:
-        #         masked_img.save(cell_path)
-
-        # Prepare Folders for Classification
-        input_dir = os.path.dirname(cropped_cell_paths[0])
+        # Prepare folders
+        first_cell_path = valid_cells_data[0]['file_path']
+        input_dir = os.path.dirname(first_cell_path)
         session_id = os.path.basename(input_dir)
-        
-        # กำหนด path ที่จะเก็บผลลัพธ์แยกโฟลเดอร์
         sorted_base_dir = os.path.join(PROCESSED_FOLDER, session_id, 'sorted_by_morphology')
         
         for class_name in CLASS_NAMES + ['Unknown']:
@@ -89,48 +88,38 @@ def analyze_image():
         analysis_results = []
         counts = Counter()
 
-        # --- STEP 4: Classification (✨ แก้ไข: ใช้ Temp Mask สำหรับ AI) ---
-        print(f"3️⃣ Classifying {len(cropped_cell_paths)} cells...")
+        # 3. Classification
+        print(f"3️⃣ Classifying {len(valid_cells_data)} cells...")
         CONFIDENCE_THRESHOLD = 95.0
 
-        for cell_path in cropped_cell_paths:
+        for cell_item in valid_cells_data:
+            cell_path = cell_item['file_path']
+            bbox = cell_item['bbox']
             cell_filename = os.path.basename(cell_path)
+            
             predicted_label = "Unknown"
             confidence = 0.0
             
-            # 🟢 1. สร้างไฟล์ Mask ชั่วคราว (_temp) เพื่อส่งให้ AI
+            # Temp Mask for AI
             temp_masked_path = cell_path.replace(".png", "_temp_mask.png")
             try:
                 masked_img = preprocess_image_with_mask(cell_path)
-                if masked_img:
-                    masked_img.save(temp_masked_path)
-                else:
-                    # กรณี Mask ไม่ติด ให้ copy ไฟล์เดิมไปแปะแทน (กัน Error)
-                    shutil.copy(cell_path, temp_masked_path)
-            except Exception:
-                 shutil.copy(cell_path, temp_masked_path)
+                if masked_img: masked_img.save(temp_masked_path)
+                else: shutil.copy(cell_path, temp_masked_path)
+            except: shutil.copy(cell_path, temp_masked_path)
 
-            # 🟢 2. ให้ AI ทำนายจากไฟล์ Temp (ที่มีพื้นหลังดำ)
+            # Predict
             if model is not None:
-                try:
-                    predicted_label, confidence = predict_image_file(model, device, temp_masked_path)
-                    
-                    if predicted_label != 'nomal_cell' and confidence < CONFIDENCE_THRESHOLD:
-                        print(f"⚠️ Low confidence ({confidence:.2f}%) for {predicted_label} -> Normal")
-                        predicted_label = 'nomal_cell' 
+                predicted_label, confidence = predict_image_file(model, device, temp_masked_path)
+                if predicted_label != 'nomal_cell' and confidence < CONFIDENCE_THRESHOLD:
+                    predicted_label = 'nomal_cell' 
 
-                except Exception as e:
-                    print(f"Error predicting: {e}")
-            
-            # 🟢 3. ลบไฟล์ Temp ทิ้ง (เสร็จภารกิจ AI แล้ว)
+            # Cleanup
             if os.path.exists(temp_masked_path):
-                try:
-                    os.remove(temp_masked_path)
-                except:
-                    pass
+                try: os.remove(temp_masked_path)
+                except: pass
 
-            # 🟢 4. Copy ไฟล์ "ต้นฉบับ" (Original) ไปยังโฟลเดอร์ผลลัพธ์
-            # เพื่อให้ findsize.py ได้รูปที่มีพื้นหลังสว่างไปคำนวณ
+            # Copy to result folder
             target_path = os.path.join(sorted_base_dir, predicted_label, cell_filename)
             shutil.copy(cell_path, target_path)
 
@@ -138,28 +127,22 @@ def analyze_image():
                 "cell": cell_filename,
                 "characteristic": predicted_label,
                 "confidence": f"{confidence:.2f}%", 
-                "url": f"cells/{session_id}/{cell_filename}" 
+                "url": f"cells/{session_id}/{cell_filename}",
+                "bbox": bbox
             })
             counts[predicted_label] += 1
 
-        # --- STEP 5: Size Analysis & Visualization ---
-        print(f"4️⃣ Analyzing Cell Sizes & Generating Visualization...")
-        
-        # ฟังก์ชันนี้จะเข้าไปอ่านไฟล์ใน sorted_base_dir (ซึ่งตอนนี้เป็นภาพ Original แล้ว)
+        # 4. Size Analysis
+        print(f"4️⃣ Analyzing Cell Sizes...")
         size_data_raw = process_folder_sizes(sorted_base_dir)
-        
         size_analysis_for_web = []
         
         if size_data_raw:
             for filename, details in size_data_raw.items():
-                full_viz_path = details.get('viz_image')
                 viz_url = None
-                
-                if full_viz_path:
-                    # Convert absolute path to relative URL
-                    rel_path = os.path.relpath(full_viz_path, PROCESSED_FOLDER)
-                    rel_path = rel_path.replace("\\", "/")
-                    viz_url = f"processed/{rel_path}"
+                if details.get('viz_image'):
+                    rel = os.path.relpath(details['viz_image'], PROCESSED_FOLDER).replace("\\", "/")
+                    viz_url = f"processed/{rel}"
 
                 size_analysis_for_web.append({
                     "filename": filename,
@@ -170,7 +153,7 @@ def analyze_image():
                     "visualization_url": viz_url 
                 })
 
-        # Diagnosis Summary
+        # Summary
         overall_diagnosis = "Normal / No Parasite Detected"
         if counts['schuffner dot'] > 0: overall_diagnosis = "P. vivax Detected"
         elif counts['band form'] > 0 or counts['basket form'] > 0: overall_diagnosis = "P. malariae Detected"
@@ -178,8 +161,9 @@ def analyze_image():
 
         return jsonify({
             "session_id": session_id,
+            "original_image_url": f"uploads/{filename}",
             "overall_diagnosis": overall_diagnosis,
-            "total_cells_segmented": len(cropped_cell_paths),
+            "total_cells_segmented": len(valid_cells_data),
             "vit_characteristics": analysis_results, 
             "size_analysis": size_analysis_for_web, 
             "summary": dict(counts)
@@ -188,8 +172,6 @@ def analyze_image():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-    finally:
-        if filepath and os.path.exists(filepath): os.remove(filepath)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
