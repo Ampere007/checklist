@@ -1,0 +1,246 @@
+/* General Page Layout - Same as original */
+.medication-guide-page {
+  font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 30px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  color: #333;
+}
+
+/* Header Section */
+.guide-header {
+  text-align: center;
+  margin-bottom: 30px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 20px;
+}
+
+.guide-title {
+  font-size: 2.5em;
+  color: #0056b3; /* คงสีเดิม */
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.guide-title i {
+  font-style: italic;
+  font-weight: 700; 
+}
+
+.guide-subtitle {
+  font-size: 1.1em;
+  color: #555;
+  font-style: normal;
+}
+
+/* Disclaimer Section */
+.disclaimer-section {
+  margin-bottom: 30px;
+}
+
+.disclaimer-card {
+  background-color: #fff3cd;
+  border-left: 5px solid #ffc107;
+  padding: 20px;
+  border-radius: 8px;
+  color: #664d03;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.disclaimer-title {
+  font-size: 1.3em;
+  color: #856404;
+  margin-top: 0;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.disclaimer-title::before {
+  content: '⚠️';
+  margin-right: 10px;
+  font-size: 1.2em;
+}
+
+.disclaimer-text {
+  font-size: 0.95em;
+  line-height: 1.6;
+}
+
+/* Regimen Title */
+.regimen-title {
+  font-size: 1.8em;
+  color: #333;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 10px;
+  margin-bottom: 25px;
+  margin-top: 40px; 
+}
+
+/* Combo Box */
+.regimen-combo-box {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 30px;
+}
+
+.combo-item {
+  width: 40%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.combo-image {
+  max-width: 100%;
+  height: 120px;
+  object-fit: contain;
+  border-radius: 8px;
+  background-color: white;
+  border: 1px solid #ccc;
+  padding: 5px;
+  margin-bottom: 15px;
+}
+
+.combo-name {
+  font-size: 1.25em;
+  color: #007bff;
+  margin: 0 0 5px 0;
+}
+
+.combo-item p {
+  font-size: 0.9em;
+  color: #555;
+  margin: 0;
+}
+
+.combo-plus {
+  font-size: 4em;
+  font-weight: 300;
+  color: #6c757d;
+}
+
+/* Administration Table */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.medication-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 30px;
+  font-size: 1em;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.medication-table th, 
+.medication-table td {
+  border: 1px solid #dee2e6;
+  padding: 14px 16px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.medication-table th {
+  background-color: #fce8eb; 
+  color: #8c1e33;
+  font-weight: 600;
+}
+
+.medication-table td:first-child {
+  text-align: left;
+  width: 45%;
+}
+
+.medication-table tbody tr {
+  background-color: #ffffff;
+}
+
+.table-note {
+  font-size: 0.85em;
+  color: #555;
+  font-style: italic;
+}
+
+.primaquine-dose {
+  background-color: #fdf2f4; 
+  font-weight: 500;
+  color: #7b2a3d;
+  line-height: 1.5;
+}
+
+/* Back Button */
+.back-button-container {
+  text-align: center;
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.back-button {
+  background-color: #6c757d;
+  color: white;
+  padding: 12px 25px;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.1em;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.back-button:hover {
+  background-color: #5a6268;
+  transform: translateY(-2px);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .regimen-combo-box {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .combo-item {
+    width: 80%;
+  }
+
+  .combo-plus {
+    font-size: 2.5em;
+    margin: 15px 0;
+  }
+  
+  .guide-title {
+    font-size: 2em;
+  }
+}
+
+@media (max-width: 480px) {
+  .medication-guide-page {
+    padding: 20px;
+    margin: 20px auto;
+  }
+  .guide-title {
+    font-size: 1.8em;
+  }
+  .medication-table {
+    font-size: 0.9em;
+  }
+  .medication-table th, 
+  .medication-table td {
+    padding: 10px;
+  }
+}
