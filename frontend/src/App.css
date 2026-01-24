@@ -132,3 +132,20 @@ body {
   .modal-analysis-grid-four { grid-template-columns: 1fr 1fr; }
   .header h1 { font-size: 2rem; }
 }
+/* ปุ่มสำหรับ Malariae Guide (เพิ่มต่อท้ายใน App.css) */
+.med-btn-orange {
+  background-color: #d35400; /* สีส้มเข้ม */
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.med-btn-orange:hover {
+  background-color: #a04000;
+  transform: translateY(-2px);
+}

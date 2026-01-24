@@ -4,6 +4,7 @@ import './App.css';
 import { Routes, Route, Link } from 'react-router-dom';
 import FalciparumGuide from './FalciparumGuide'; 
 import VivaxGuide from './VivaxGuide';
+import MalariaeGuide from './MalariaeGuide'; // 1. IMPORT MalariaeGuide
 
 // --- IMPORT Icons ---
 import checkIcon from './picture/check (3).png';
@@ -71,7 +72,7 @@ const ImageGallery = ({ title, images, onClose }) => (
     </div>
 );
 
-// SizeGallery (กล่องเขียว - แก้ไข Filter ให้แสดงเฉพาะขอบเขียว)
+// SizeGallery
 const SizeGallery = ({ title, items, onClose }) => (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -83,7 +84,6 @@ const SizeGallery = ({ title, items, onClose }) => (
                 {items.map((item, index) => (
                     <div key={index} className="abnormal-cell-item" style={{ border: item.status === 'Enlarged' ? '2px solid #ef4444' : '1px solid #e2e8f0' }}>
                         <div style={{position:'relative', overflow: 'hidden', borderRadius: '8px 8px 0 0'}}>
-                            {/* แสดงรูป Visualization (ขอบเขียว) */}
                             <img src={`${BACKEND_URL}/${item.visualization_url}`} alt="Size Viz" style={{width: '100%', display: 'block'}} />
                             
                             {item.status === 'Enlarged' && <div className="enlarged-label-overlay">{item.folder}</div>}
@@ -104,7 +104,7 @@ const SizeGallery = ({ title, items, onClose }) => (
     </div>
 );
 
-// ✨ DistanceGallery (กล่องใหม่: Algorithm Visualization)
+// DistanceGallery
 const DistanceGallery = ({ title, items, onClose }) => (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -116,7 +116,6 @@ const DistanceGallery = ({ title, items, onClose }) => (
                 {items.map((item, index) => (
                     <div key={index} className="abnormal-cell-item" style={{ border: '2px solid #0ea5e9' }}>
                         <div style={{position:'relative', overflow: 'hidden', borderRadius: '8px 8px 0 0', background:'black'}}>
-                            {/* แสดงรูป Algorithm (Distance Viz - พื้นดำ) */}
                             <img src={`${BACKEND_URL}/${item.distance_viz_url}`} alt="Algo Viz" style={{width: '100%', display: 'block'}} />
                         </div>
                         <div style={{padding:'12px', textAlign:'left', background:'white'}}>
@@ -214,27 +213,22 @@ function AnalysisPage() {
   const totalCells = res?.total_cells_segmented || 0;
   const allCells = res?.vit_characteristics || [];
   
-  // --- [CORRECTED FILTER] ---
-  // แก้ไข: ไม่กรองคำว่า 'chromatin' (เพราะเชื้อก็ชื่อ chromatin)
-  // แต่กรอง URL ที่มีคำว่า 'dist_viz' (ภาพดำ) ออกแทน
   const sizeData = (res?.size_analysis || []).filter(item => {
       const url = (item.visualization_url || "").toLowerCase();
-      // ถ้า URL มีคำว่า dist_viz แปลว่าเป็นภาพดำ -> ให้ return false (ไม่เอา)
       return !url.includes('dist_viz') && !url.includes('distance');
   });
 
   const amoeboidCount = res?.amoeboid_count || 0;
 
+  // Check Diagnosis Types
   const isVivax = overallDiagnosis.includes("vivax");
   const isFalciparum = overallDiagnosis.includes("falciparum");
-  const isMalariae = overallDiagnosis.includes("malariae");
+  const isMalariae = overallDiagnosis.includes("malariae"); // เช็ค Malariae
 
   const chromatinCells = allCells.filter(c => c.characteristic === '1chromatin');
   const schuffnerCells = allCells.filter(c => ['schuffner dot'].includes(c.characteristic)); 
   const basketCells = allCells.filter(c => ['band form', 'basket form'].includes(c.characteristic));
   const abnormalCells = allCells.filter(c => c.characteristic !== 'nomal_cell');
-
-  // ✨ เตรียมข้อมูลสำหรับกล่อง Distance Algorithm (เฉพาะที่มี distance_viz_url)
   const distanceData = allCells.filter(c => c.distance_viz_url);
 
   let avgRatio = 1.0;
@@ -301,7 +295,6 @@ function AnalysisPage() {
                 {preview && <InteractiveImage imageUrl={preview} cells={abnormalCells} onCellClick={(cell) => setSelectedCellDetail(cell)} />}
              </div>
 
-             {/* กล่อง 1: Size Analysis (แสดงเฉพาะขอบเขียว - แก้ไข Filter แล้ว) */}
              <div className="detail-card clickable-card" onClick={() => setShowSizeGallery(true)} style={{borderLeft:'5px solid #8b5cf6'}}>
                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                     <div>
@@ -317,7 +310,6 @@ function AnalysisPage() {
                  </div>
              </div>
 
-             {/* ✨ กล่อง 2: Distance Algorithm Visualization (สีฟ้า) */}
              {distanceData.length > 0 && (
                  <div className="detail-card clickable-card" onClick={() => setShowDistanceGallery(true)} style={{borderLeft:'5px solid #0ea5e9'}}>
                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
@@ -412,8 +404,10 @@ function AnalysisPage() {
 
              <div className="action-buttons">
                 <button onClick={()=>window.location.reload()} className="restart-btn">เริ่มใหม่</button>
+                {/* 3. Button Linking Logic */}
                 {isFalciparum && <Link to="/medication-guide/falciparum"><button className="med-btn-red">แนวทางการรักษา (P.f)</button></Link>}
                 {isVivax && <Link to="/medication-guide/vivax"><button className="med-btn-green">แนวทางการรักษา (P.v)</button></Link>}
+                {isMalariae && <Link to="/medication-guide/malariae"><button className="med-btn-orange">แนวทางการรักษา (P.m)</button></Link>}
              </div>
           </div>
         </div>
@@ -421,28 +415,20 @@ function AnalysisPage() {
 
       {/* GALLERIES */}
       {showSizeGallery && <SizeGallery title="Size Calculation Results" items={sizeData} onClose={()=>setShowSizeGallery(false)} />}
-      
-      {/* ✨ Distance Gallery (แสดงเมื่อคลิกกล่องใหม่) */}
       {showDistanceGallery && <DistanceGallery title="Distance Algorithm Visualization" items={distanceData} onClose={()=>setShowDistanceGallery(false)} />}
-      
       {showChromatinGallery && <ImageGallery title="Abnormal Chromatin" images={chromatinCells} onClose={()=>setShowChromatinGallery(false)}/>}
       {showSchuffnerGallery && <ImageGallery title="Schüffner's Dot / Amoeboid" images={schuffnerCells} onClose={()=>setShowSchuffnerGallery(false)}/>}
       {showBasketGallery && <ImageGallery title="Basket/Band Form" images={basketCells} onClose={()=>setShowBasketGallery(false)}/>}
       {viewingImage && <SingleImageViewer imageUrl={viewingImage} onClose={()=>setViewingImage(null)}/>}
 
-      {/* MODAL รายละเอียดเซลล์ (3 Images + 4 Stats) */}
+      {/* MODAL รายละเอียดเซลล์ */}
       {selectedCellDetail && (
           <div className="modal-overlay" onClick={() => setSelectedCellDetail(null)}>
               <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{textAlign:'center', maxWidth:'900px', padding: '30px'}}>
                   <h3 style={{color:'#ef4444', marginTop:0, marginBottom: '20px'}}>ตรวจพบเชื้อผิดปกติ!</h3>
-                  
                   <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: '15px',
-                      marginBottom: '25px'
+                      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '25px'
                   }}>
-                      {/* รูปที่ 1 */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>1. Original Detection</p>
                           <div style={{ position: 'relative', width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
@@ -468,7 +454,6 @@ function AnalysisPage() {
                           </div>
                       </div>
 
-                      {/* รูปที่ 2 */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>2. Size Analysis</p>
                           <div style={{ width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -481,7 +466,6 @@ function AnalysisPage() {
                           </div>
                       </div>
 
-                      {/* รูปที่ 3 */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>3. Distance Algorithm</p>
                           <div style={{ width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '2px solid #bae6fd', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -499,7 +483,6 @@ function AnalysisPage() {
                           <strong>ประเภทเชื้อ:</strong> <span style={{color:'var(--primary)', fontWeight: '700'}}>{selectedCellDetail.characteristic}</span>
                       </p>
                       
-                      {/* Grid 4 Stats */}
                       <div className="modal-analysis-grid-four">
                           <div className="analysis-box">
                               <span className="analysis-label">Morphometry</span>
@@ -576,7 +559,6 @@ function AnalysisPage() {
                           </div>
                       )}
                   </div>
-
                   <button onClick={() => setSelectedCellDetail(null)} className="close-button-alt">ปิดหน้าต่าง</button>
               </div>
           </div>
@@ -593,6 +575,7 @@ function AppWrapper() {
         <Route path="/" element={<AnalysisPage />} /> 
         <Route path="/medication-guide/falciparum" element={<FalciparumGuide />} /> 
         <Route path="/medication-guide/vivax" element={<VivaxGuide />} />
+        <Route path="/medication-guide/malariae" element={<MalariaeGuide />} /> {/* 2. Add Route */}
       </Routes>
     </div>
   );
