@@ -1,25 +1,72 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 import { Routes, Route, Link } from 'react-router-dom';
+import { initializeApp } from "firebase/app";
+// 1. เพิ่ม push และ set เข้ามาเพื่อใช้บันทึกข้อมูล
+import { getDatabase, ref, onValue, push, set } from "firebase/database";
+
+// --- IMPORT GUIDES ---
 import FalciparumGuide from './FalciparumGuide'; 
 import VivaxGuide from './VivaxGuide';
-import MalariaeGuide from './MalariaeGuide'; // 1. IMPORT MalariaeGuide
+import MalariaeGuide from './MalariaeGuide'; 
 
-// --- IMPORT Icons ---
+// --- IMPORT ICONS ---
 import checkIcon from './picture/check (3).png';
 import emptyBoxIcon from './picture/check-box-empty.png';
 
 const BACKEND_URL = 'http://127.0.0.1:5001';
 
 // ==============================
-// 1. COMPONENTS
+// 0. FIREBASE CONFIGURATION
+// ==============================
+// ใส่รหัสของคุณให้เรียบร้อยแล้วครับ
+const firebaseConfig = {
+  apiKey: "AIzaSyDa_8UHDLV8i4h7jdsm-fEHNMgW-h61p04",
+  authDomain: "malariaxchecklist.firebaseapp.com",
+  databaseURL: "https://malariaxchecklist-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "malariaxchecklist",
+  storageBucket: "malariaxchecklist.firebasestorage.app",
+  messagingSenderId: "528337272211",
+  appId: "1:528337272211:web:b030370ae52bff5d7afc66",
+  measurementId: "G-YL05EPR7PT"
+};
+
+// เริ่มต้น Firebase (เช็คก่อนว่า init ไปหรือยังป้องกัน Error ซ้ำ)
+let app, db;
+try {
+    app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+} catch (err) {
+    console.log("Firebase already initialized, using existing app.");
+    app = initializeApp(firebaseConfig, "secondary"); // Fallback
+    db = getDatabase(app);
+}
+
+// ==============================
+// 1. HELPER FUNCTIONS
 // ==============================
 
-// InteractiveImage
+// ฟังก์ชันแปลง Base64 (จากกล้อง) เป็น File Object เพื่อส่งให้ Backend
+const dataURLtoFile = (dataurl, filename) => {
+    let arr = dataurl.split(','),
+        mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), 
+        n = bstr.length, 
+        u8arr = new Uint8Array(n);
+    while(n--){
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, {type:mime});
+}
+
+// ==============================
+// 2. COMPONENTS
+// ==============================
+
 const InteractiveImage = ({ imageUrl, cells, onCellClick }) => {
-    const [imgSize, setImgSize] = React.useState({ w: 0, h: 0 });
-    const imgRef = React.useRef(null);
+    const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+    const imgRef = useRef(null);
 
     const handleImageLoad = (e) => {
         setImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight });
@@ -49,7 +96,7 @@ const InteractiveImage = ({ imageUrl, cells, onCellClick }) => {
     );
 };
 
-// ImageGallery (General)
+// Galleries
 const ImageGallery = ({ title, images, onClose }) => (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -72,7 +119,6 @@ const ImageGallery = ({ title, images, onClose }) => (
     </div>
 );
 
-// SizeGallery
 const SizeGallery = ({ title, items, onClose }) => (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -85,7 +131,6 @@ const SizeGallery = ({ title, items, onClose }) => (
                     <div key={index} className="abnormal-cell-item" style={{ border: item.status === 'Enlarged' ? '2px solid #ef4444' : '1px solid #e2e8f0' }}>
                         <div style={{position:'relative', overflow: 'hidden', borderRadius: '8px 8px 0 0'}}>
                             <img src={`${BACKEND_URL}/${item.visualization_url}`} alt="Size Viz" style={{width: '100%', display: 'block'}} />
-                            
                             {item.status === 'Enlarged' && <div className="enlarged-label-overlay">{item.folder}</div>}
                             {item.status === 'Enlarged' && <span className="badge-enlarged">Enlarged</span>}
                         </div>
@@ -104,7 +149,6 @@ const SizeGallery = ({ title, items, onClose }) => (
     </div>
 );
 
-// DistanceGallery
 const DistanceGallery = ({ title, items, onClose }) => (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -119,22 +163,9 @@ const DistanceGallery = ({ title, items, onClose }) => (
                             <img src={`${BACKEND_URL}/${item.distance_viz_url}`} alt="Algo Viz" style={{width: '100%', display: 'block'}} />
                         </div>
                         <div style={{padding:'12px', textAlign:'left', background:'white'}}>
-                            <div className="info-row">
-                                <span className="label">Type:</span> 
-                                <strong style={{color:'var(--primary)'}}>{item.characteristic}</strong>
-                            </div>
-                            <div className="info-row">
-                                <span className="label">Marginal Ratio:</span> 
-                                <strong style={{color: item.marginal_ratio > 0.75 ? '#ef4444' : '#0369a1'}}>
-                                    {(item.marginal_ratio * 100).toFixed(1)}%
-                                </strong>
-                            </div>
-                            <div className="info-row border-top">
-                                <span className="label">Pos:</span> 
-                                <span style={{fontSize:'0.8rem', color:'#64748b'}}>
-                                    {item.marginal_ratio > 0.75 ? "Edge (Appliqué)" : "Internal"}
-                                </span>
-                            </div>
+                            <div className="info-row"><span className="label">Type:</span> <strong style={{color:'var(--primary)'}}>{item.characteristic}</strong></div>
+                            <div className="info-row"><span className="label">Marginal Ratio:</span> <strong style={{color: item.marginal_ratio > 0.75 ? '#ef4444' : '#0369a1'}}>{(item.marginal_ratio * 100).toFixed(1)}%</strong></div>
+                            <div className="info-row border-top"><span className="label">Pos:</span> <span style={{fontSize:'0.8rem', color:'#64748b'}}>{item.marginal_ratio > 0.75 ? "Edge (Appliqué)" : "Internal"}</span></div>
                         </div>
                     </div>
                 ))}
@@ -146,7 +177,6 @@ const DistanceGallery = ({ title, items, onClose }) => (
     </div>
 );
 
-// SingleImageViewer
 const SingleImageViewer = ({ imageUrl, onClose }) => {
     if (!imageUrl) return null;
     return (
@@ -160,28 +190,48 @@ const SingleImageViewer = ({ imageUrl, onClose }) => {
 };
 
 // ==============================
-// 2. MAIN PAGE LOGIC
+// 3. MAIN PAGE LOGIC
 // ==============================
 
 function AnalysisPage() {
-  const [selectedFile, setSelectedFile] = React.useState(null);
-  const [preview, setPreview] = React.useState(null);
-  const [res, setRes] = React.useState(null); 
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState('');
+  const [inputMode, setInputMode] = useState('choose'); 
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [res, setRes] = useState(null); 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   
-  // Galleries States
-  const [showChromatinGallery, setShowChromatinGallery] = React.useState(false);
-  const [showSchuffnerGallery, setShowSchuffnerGallery] = React.useState(false);
-  const [showBasketGallery, setShowBasketGallery] = React.useState(false);
-  const [showSizeGallery, setShowSizeGallery] = React.useState(false);
-  const [showDistanceGallery, setShowDistanceGallery] = React.useState(false);
-  
-  const [viewingImage, setViewingImage] = React.useState(null);
-  const [selectedCellDetail, setSelectedCellDetail] = React.useState(null);
-  
-  const [modalImgSize, setModalImgSize] = React.useState({ w: 0, h: 0 });
+  // Camera State
+  const [liveImage, setLiveImage] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
+  // Galleries States
+  const [showChromatinGallery, setShowChromatinGallery] = useState(false);
+  const [showSchuffnerGallery, setShowSchuffnerGallery] = useState(false);
+  const [showBasketGallery, setShowBasketGallery] = useState(false);
+  const [showSizeGallery, setShowSizeGallery] = useState(false);
+  const [showDistanceGallery, setShowDistanceGallery] = useState(false);
+  
+  const [viewingImage, setViewingImage] = useState(null);
+  const [selectedCellDetail, setSelectedCellDetail] = useState(null);
+  const [modalImgSize, setModalImgSize] = useState({ w: 0, h: 0 });
+
+  // --- CAMERA LOGIC ---
+  useEffect(() => {
+    if (inputMode === 'camera' && !res) {
+        const streamRef = ref(db, 'streams/stream1');
+        const unsubscribe = onValue(streamRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.frame) {
+                setLiveImage(data.frame);
+                setLastUpdate(new Date(data.ts).toLocaleTimeString());
+            }
+        });
+        return () => unsubscribe();
+    }
+  }, [inputMode, res]);
+
+  // --- HANDLERS ---
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -192,6 +242,52 @@ function AnalysisPage() {
     }
   };
 
+  const handleCaptureAndAnalyze = async () => {
+      if (!liveImage) return setError("ยังไม่ได้รับสัญญาณภาพจากกล้อง");
+      
+      setLoading(true); setError('');
+      
+      // 1. แปลงภาพ Base64 -> File เพื่อส่ง Backend
+      const file = dataURLtoFile(liveImage, "capture_rpi.jpg");
+      
+      // 2. ตั้งค่า Preview
+      setSelectedFile(file);
+      setPreview(URL.createObjectURL(file));
+
+      // ----------------------------------------------------
+      // 🔥 [NEW] บันทึกภาพลง Firebase Database
+      // ----------------------------------------------------
+      try {
+          const capturesRef = ref(db, 'captures'); // สร้างโฟลเดอร์ชื่อ captures
+          const newCaptureRef = push(capturesRef); // สร้าง key ใหม่
+          await set(newCaptureRef, {
+              image: liveImage, // เก็บภาพ (Base64)
+              timestamp: Date.now(), // เก็บเวลา (Timestamp)
+              date: new Date().toLocaleString(), // เก็บเวลา (แบบอ่านออก)
+              note: "Captured via Web Interface"
+          });
+          console.log("บันทึกภาพลง Database สำเร็จ!");
+      } catch (dbError) {
+          console.error("บันทึกลง Firebase ไม่สำเร็จ:", dbError);
+          // ไม่ return error เพราะจะให้วิเคราะห์ต่อได้ แม้บันทึกไม่สำเร็จ
+      }
+      // ----------------------------------------------------
+      
+      // 3. ส่งไปวิเคราะห์ที่ Backend AI
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const response = await axios.post(`${BACKEND_URL}/api/analyze`, formData);
+        setRes(response.data);
+      } catch (err) {
+        console.error(err);
+        setError("เกิดข้อผิดพลาด: Backend ไม่ตอบสนอง");
+      } finally {
+        setLoading(false);
+      }
+  };
+
   const handleSubmit = async () => { 
     if (!selectedFile) return setError('กรุณาเลือกไฟล์ก่อน');
     setLoading(true); setError(''); setRes(null); 
@@ -200,15 +296,15 @@ function AnalysisPage() {
     try {
       const response = await axios.post(`${BACKEND_URL}/api/analyze`, formData);
       setRes(response.data);
-      setLoading(false);
     } catch (err) {
       console.error(err);
       setError("เกิดข้อผิดพลาด: Backend ไม่ตอบสนอง"); 
+    } finally {
       setLoading(false);
-    } 
+    }
   };
 
-  // Data Processing
+  // --- DATA PROCESSING (Keep exact logic) ---
   const overallDiagnosis = res?.overall_diagnosis || "";
   const totalCells = res?.total_cells_segmented || 0;
   const allCells = res?.vit_characteristics || [];
@@ -219,11 +315,9 @@ function AnalysisPage() {
   });
 
   const amoeboidCount = res?.amoeboid_count || 0;
-
-  // Check Diagnosis Types
   const isVivax = overallDiagnosis.includes("vivax");
   const isFalciparum = overallDiagnosis.includes("falciparum");
-  const isMalariae = overallDiagnosis.includes("malariae"); // เช็ค Malariae
+  const isMalariae = overallDiagnosis.includes("malariae");
 
   const chromatinCells = allCells.filter(c => c.characteristic === '1chromatin');
   const schuffnerCells = allCells.filter(c => ['schuffner dot'].includes(c.characteristic)); 
@@ -247,6 +341,7 @@ function AnalysisPage() {
   const chkBand = allCells.some(c => c.characteristic === 'band form');
   const chkBasket = allCells.some(c => c.characteristic === 'basket form');
 
+  // --- RENDER ---
   return (
     <div className="container"> 
        <header className="header">
@@ -254,29 +349,114 @@ function AnalysisPage() {
         <p>AI-Powered Malaria Screening & Morphometric Analysis</p>
       </header>
 
+      {/* ---------------- SECTION: INPUT (Choose / Upload / Camera) ---------------- */}
       {!res && !loading && (
         <div className="upload-section">
-            <input type="file" onChange={handleFileChange} accept="image/*" className="file-input" id="file"/>
-            {preview ? (
-                <div>
-                    <img src={preview} alt="Preview" className="upload-preview"/>
-                    <div><label htmlFor="file" className="file-label">เปลี่ยนรูปภาพ</label></div>
+            
+            {/* 1. หน้าเลือกโหมด (Choose Mode) */}
+            {inputMode === 'choose' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '600px', margin: '0 auto' }}>
+                    <button 
+                        onClick={() => setInputMode('camera')}
+                        className="mode-btn"
+                        style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}
+                    >
+                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📷</div>
+                        <b>ใช้กล้อง RPi (Live)</b>
+                    </button>
+                    <button 
+                        onClick={() => setInputMode('upload')}
+                        className="mode-btn"
+                        style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}
+                    >
+                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📁</div>
+                        <b>อัปโหลดไฟล์</b>
+                    </button>
                 </div>
-            ) : (
-                <label htmlFor="file" style={{cursor:'pointer'}}>
-                    <div className="upload-icon">+</div>
-                    <h3>อัปโหลดภาพฟิล์มเลือด</h3>
-                    <div className="file-label">เลือกไฟล์รูปภาพ</div>
-                </label>
             )}
-            {selectedFile && (
-                <div style={{marginTop: '30px'}}>
-                    <button onClick={handleSubmit} className="analyze-button">เริ่มวิเคราะห์ภาพ (Start Analysis)</button>
+
+            {/* 2. โหมดอัปโหลดไฟล์ (Upload Mode) */}
+            {inputMode === 'upload' && (
+                <>
+                    <input type="file" onChange={handleFileChange} accept="image/*" className="file-input" id="file"/>
+                    {preview ? (
+                        <div>
+                            <img src={preview} alt="Preview" className="upload-preview"/>
+                            <div><label htmlFor="file" className="file-label">เปลี่ยนรูปภาพ</label></div>
+                        </div>
+                    ) : (
+                        <label htmlFor="file" style={{cursor:'pointer'}}>
+                            <div className="upload-icon">+</div>
+                            <h3>อัปโหลดภาพฟิล์มเลือด</h3>
+                            <div className="file-label">เลือกไฟล์รูปภาพ</div>
+                        </label>
+                    )}
+                    
+                    <div style={{marginTop: '30px', display:'flex', gap:'10px', justifyContent:'center'}}>
+                        <button onClick={() => {setInputMode('choose'); setPreview(null); setSelectedFile(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>
+                            ← ย้อนกลับ
+                        </button>
+                        {selectedFile && (
+                            <button onClick={handleSubmit} className="analyze-button">เริ่มวิเคราะห์ภาพ</button>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {/* 3. โหมดกล้อง (Camera Mode) */}
+            {inputMode === 'camera' && (
+                <div style={{textAlign: 'center'}}>
+                    <div style={{ 
+                        border: '5px solid #333', 
+                        borderRadius: '10px',
+                        display: 'inline-block',
+                        overflow: 'hidden',
+                        background: '#000',
+                        boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                        marginBottom: '20px'
+                    }}>
+                        {liveImage ? (
+                            <img 
+  src={liveImage} 
+  alt="Live Stream" 
+  style={{ 
+    width: '450x', 
+    height: '420px',       // 1. ฟิกความสูง
+    objectFit: 'cover',    // 2. สั่งให้ขยายเต็ม
+    transform: 'scale(1.3)', // 3. ซูมเข้าไป 1.3 เท่า (ปรับเลขนี้ได้ถ้ายังเห็นขอบดำ)
+    display: 'block' 
+  }} 
+/>
+                        ) : (
+                            <div style={{ width: '640px', height: '480px', color: '#fff', display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center' }}>
+                                <div className="loader" style={{width:'30px', height:'30px', marginBottom:'10px'}}></div>
+                                กำลังเชื่อมต่อกล้อง Raspberry Pi...
+                            </div>
+                        )}
+                    </div>
+                    
+                    {lastUpdate && <p style={{color:'#64748b', fontSize:'0.8rem', marginTop:'-15px', marginBottom:'20px'}}>อัปเดตล่าสุด: {lastUpdate}</p>}
+
+                    <div style={{display:'flex', gap:'15px', justifyContent:'center'}}>
+                         <button onClick={() => {setInputMode('choose'); setLiveImage(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>
+                            ← ยกเลิก
+                        </button>
+                        <button 
+                            onClick={handleCaptureAndAnalyze} 
+                            disabled={!liveImage}
+                            className="analyze-button"
+                            style={{ background: liveImage ? '#ef4444' : '#ccc', cursor: liveImage ? 'pointer' : 'not-allowed' }}
+                        >
+                            📸 ถ่ายภาพ & วิเคราะห์ทันที
+                        </button>
+                    </div>
                 </div>
             )}
+            
             {error && <p className="error-msg">{error}</p>}
         </div>
       )}
+      {/* ---------------- END INPUT SECTION ---------------- */}
 
       {loading && (
           <div className="loader-container">
