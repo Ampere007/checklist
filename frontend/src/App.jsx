@@ -3,7 +3,6 @@ import axios from 'axios';
 import './App.css';
 import { Routes, Route, Link } from 'react-router-dom';
 import { initializeApp } from "firebase/app";
-// 1. เพิ่ม push และ set เข้ามาเพื่อใช้บันทึกข้อมูล
 import { getDatabase, ref, onValue, push, set } from "firebase/database";
 
 // --- IMPORT GUIDES ---
@@ -20,7 +19,6 @@ const BACKEND_URL = 'http://127.0.0.1:5001';
 // ==============================
 // 0. FIREBASE CONFIGURATION
 // ==============================
-// ใส่รหัสของคุณให้เรียบร้อยแล้วครับ
 const firebaseConfig = {
   apiKey: "AIzaSyDa_8UHDLV8i4h7jdsm-fEHNMgW-h61p04",
   authDomain: "malariaxchecklist.firebaseapp.com",
@@ -32,22 +30,19 @@ const firebaseConfig = {
   measurementId: "G-YL05EPR7PT"
 };
 
-// เริ่มต้น Firebase (เช็คก่อนว่า init ไปหรือยังป้องกัน Error ซ้ำ)
 let app, db;
 try {
     app = initializeApp(firebaseConfig);
     db = getDatabase(app);
 } catch (err) {
     console.log("Firebase already initialized, using existing app.");
-    app = initializeApp(firebaseConfig, "secondary"); // Fallback
+    app = initializeApp(firebaseConfig, "secondary");
     db = getDatabase(app);
 }
 
 // ==============================
 // 1. HELPER FUNCTIONS
 // ==============================
-
-// ฟังก์ชันแปลง Base64 (จากกล้อง) เป็น File Object เพื่อส่งให้ Backend
 const dataURLtoFile = (dataurl, filename) => {
     let arr = dataurl.split(','),
         mime = arr[0].match(/:(.*?);/)[1],
@@ -75,11 +70,12 @@ const InteractiveImage = ({ imageUrl, cells, onCellClick }) => {
     return (
         <div style={{ position: 'relative', width: '100%', overflow: 'hidden', borderRadius: '16px' }}>
             <img 
-                ref={imgRef} src={imageUrl} alt="Original Slide" 
+                ref={imgRef} src={imageUrl} alt="Analyzed Slide" 
                 onLoad={handleImageLoad} style={{ width: '100%', display: 'block' }} 
             />
             {imgSize.w > 0 && cells.map((cell, index) => {
                 if (!cell.bbox) return null;
+                // คำนวณตำแหน่ง % เทียบกับขนาดรูปจริงที่โหลดมา (ซึ่งตอนนี้จะเป็นรูปสี่เหลี่ยมแล้ว)
                 const left = (cell.bbox.x / imgSize.w) * 100;
                 const top = (cell.bbox.y / imgSize.h) * 100;
                 const width = (cell.bbox.w / imgSize.w) * 100;
@@ -247,33 +243,24 @@ function AnalysisPage() {
       
       setLoading(true); setError('');
       
-      // 1. แปลงภาพ Base64 -> File เพื่อส่ง Backend
       const file = dataURLtoFile(liveImage, "capture_rpi.jpg");
       
-      // 2. ตั้งค่า Preview
       setSelectedFile(file);
       setPreview(URL.createObjectURL(file));
 
-      // ----------------------------------------------------
-      // 🔥 [NEW] บันทึกภาพลง Firebase Database
-      // ----------------------------------------------------
       try {
-          const capturesRef = ref(db, 'captures'); // สร้างโฟลเดอร์ชื่อ captures
-          const newCaptureRef = push(capturesRef); // สร้าง key ใหม่
+          const capturesRef = ref(db, 'captures');
+          const newCaptureRef = push(capturesRef);
           await set(newCaptureRef, {
-              image: liveImage, // เก็บภาพ (Base64)
-              timestamp: Date.now(), // เก็บเวลา (Timestamp)
-              date: new Date().toLocaleString(), // เก็บเวลา (แบบอ่านออก)
+              image: liveImage,
+              timestamp: Date.now(),
+              date: new Date().toLocaleString(),
               note: "Captured via Web Interface"
           });
-          console.log("บันทึกภาพลง Database สำเร็จ!");
       } catch (dbError) {
           console.error("บันทึกลง Firebase ไม่สำเร็จ:", dbError);
-          // ไม่ return error เพราะจะให้วิเคราะห์ต่อได้ แม้บันทึกไม่สำเร็จ
       }
-      // ----------------------------------------------------
       
-      // 3. ส่งไปวิเคราะห์ที่ Backend AI
       const formData = new FormData();
       formData.append('file', file);
       
@@ -304,7 +291,7 @@ function AnalysisPage() {
     }
   };
 
-  // --- DATA PROCESSING (Keep exact logic) ---
+  // --- DATA PROCESSING ---
   const overallDiagnosis = res?.overall_diagnosis || "";
   const totalCells = res?.total_cells_segmented || 0;
   const allCells = res?.vit_characteristics || [];
@@ -341,6 +328,15 @@ function AnalysisPage() {
   const chkBand = allCells.some(c => c.characteristic === 'band form');
   const chkBasket = allCells.some(c => c.characteristic === 'basket form');
 
+  // =========================================================
+  // 🔥 FIX: Determine which image to show in Main Result 🔥
+  // =========================================================
+  // ถ้า Backend ส่ง original_image_url มา (เป็นรูปที่ Crop แล้ว) ให้ใช้รูปนั้น
+  // ถ้าไม่มี (ยังไม่ได้กดวิเคราะห์) ให้ใช้ preview (รูปต้นฉบับในเครื่อง)
+  const finalDisplayImage = res?.original_image_url 
+      ? `${BACKEND_URL}/${res.original_image_url}` 
+      : preview;
+
   // --- RENDER ---
   return (
     <div className="container"> 
@@ -349,33 +345,22 @@ function AnalysisPage() {
         <p>AI-Powered Malaria Screening & Morphometric Analysis</p>
       </header>
 
-      {/* ---------------- SECTION: INPUT (Choose / Upload / Camera) ---------------- */}
+      {/* INPUT SECTION */}
       {!res && !loading && (
         <div className="upload-section">
-            
-            {/* 1. หน้าเลือกโหมด (Choose Mode) */}
+            {/* 1. หน้าเลือกโหมด */}
             {inputMode === 'choose' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '600px', margin: '0 auto' }}>
-                    <button 
-                        onClick={() => setInputMode('camera')}
-                        className="mode-btn"
-                        style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}
-                    >
-                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📷</div>
-                        <b>ใช้กล้อง RPi (Live)</b>
+                    <button onClick={() => setInputMode('camera')} className="mode-btn" style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}>
+                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📷</div><b>ใช้กล้อง RPi (Live)</b>
                     </button>
-                    <button 
-                        onClick={() => setInputMode('upload')}
-                        className="mode-btn"
-                        style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}
-                    >
-                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📁</div>
-                        <b>อัปโหลดไฟล์</b>
+                    <button onClick={() => setInputMode('upload')} className="mode-btn" style={{ padding: '40px', fontSize: '1.2rem', cursor: 'pointer', borderRadius: '12px', border: '2px solid #333', background: '#fff' }}>
+                        <div style={{fontSize: '3rem', marginBottom: '10px'}}>📁</div><b>อัปโหลดไฟล์</b>
                     </button>
                 </div>
             )}
 
-            {/* 2. โหมดอัปโหลดไฟล์ (Upload Mode) */}
+            {/* 2. โหมดอัปโหลด */}
             {inputMode === 'upload' && (
                 <>
                     <input type="file" onChange={handleFileChange} accept="image/*" className="file-input" id="file"/>
@@ -386,77 +371,38 @@ function AnalysisPage() {
                         </div>
                     ) : (
                         <label htmlFor="file" style={{cursor:'pointer'}}>
-                            <div className="upload-icon">+</div>
-                            <h3>อัปโหลดภาพฟิล์มเลือด</h3>
-                            <div className="file-label">เลือกไฟล์รูปภาพ</div>
+                            <div className="upload-icon">+</div><h3>อัปโหลดภาพฟิล์มเลือด</h3><div className="file-label">เลือกไฟล์รูปภาพ</div>
                         </label>
                     )}
-                    
                     <div style={{marginTop: '30px', display:'flex', gap:'10px', justifyContent:'center'}}>
-                        <button onClick={() => {setInputMode('choose'); setPreview(null); setSelectedFile(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>
-                            ← ย้อนกลับ
-                        </button>
-                        {selectedFile && (
-                            <button onClick={handleSubmit} className="analyze-button">เริ่มวิเคราะห์ภาพ</button>
-                        )}
+                        <button onClick={() => {setInputMode('choose'); setPreview(null); setSelectedFile(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>← ย้อนกลับ</button>
+                        {selectedFile && (<button onClick={handleSubmit} className="analyze-button">เริ่มวิเคราะห์ภาพ</button>)}
                     </div>
                 </>
             )}
 
-            {/* 3. โหมดกล้อง (Camera Mode) */}
+            {/* 3. โหมดกล้อง */}
             {inputMode === 'camera' && (
                 <div style={{textAlign: 'center'}}>
-                    <div style={{ 
-                        border: '5px solid #333', 
-                        borderRadius: '10px',
-                        display: 'inline-block',
-                        overflow: 'hidden',
-                        background: '#000',
-                        boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-                        marginBottom: '20px'
-                    }}>
+                    <div style={{ border: '5px solid #333', borderRadius: '10px', display: 'inline-block', overflow: 'hidden', background: '#000', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', marginBottom: '20px' }}>
                         {liveImage ? (
-                            <img 
-  src={liveImage} 
-  alt="Live Stream" 
-  style={{ 
-    width: '450x', 
-    height: '420px',       // 1. ฟิกความสูง
-    objectFit: 'cover',    // 2. สั่งให้ขยายเต็ม
-    transform: 'scale(1.3)', // 3. ซูมเข้าไป 1.3 เท่า (ปรับเลขนี้ได้ถ้ายังเห็นขอบดำ)
-    display: 'block' 
-  }} 
-/>
+                            <img src={liveImage} alt="Live Stream" style={{ width: '450x', height: '420px', objectFit: 'cover', transform: 'scale(1.3)', display: 'block' }} />
                         ) : (
                             <div style={{ width: '640px', height: '480px', color: '#fff', display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center' }}>
-                                <div className="loader" style={{width:'30px', height:'30px', marginBottom:'10px'}}></div>
-                                กำลังเชื่อมต่อกล้อง Raspberry Pi...
+                                <div className="loader" style={{width:'30px', height:'30px', marginBottom:'10px'}}></div>กำลังเชื่อมต่อกล้อง Raspberry Pi...
                             </div>
                         )}
                     </div>
-                    
                     {lastUpdate && <p style={{color:'#64748b', fontSize:'0.8rem', marginTop:'-15px', marginBottom:'20px'}}>อัปเดตล่าสุด: {lastUpdate}</p>}
-
                     <div style={{display:'flex', gap:'15px', justifyContent:'center'}}>
-                         <button onClick={() => {setInputMode('choose'); setLiveImage(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>
-                            ← ยกเลิก
-                        </button>
-                        <button 
-                            onClick={handleCaptureAndAnalyze} 
-                            disabled={!liveImage}
-                            className="analyze-button"
-                            style={{ background: liveImage ? '#ef4444' : '#ccc', cursor: liveImage ? 'pointer' : 'not-allowed' }}
-                        >
-                            📸 ถ่ายภาพ & วิเคราะห์ทันที
-                        </button>
+                         <button onClick={() => {setInputMode('choose'); setLiveImage(null);}} className="restart-btn" style={{background:'#64748b', color:'white'}}>← ยกเลิก</button>
+                        <button onClick={handleCaptureAndAnalyze} disabled={!liveImage} className="analyze-button" style={{ background: liveImage ? '#ef4444' : '#ccc', cursor: liveImage ? 'pointer' : 'not-allowed' }}>📸 ถ่ายภาพ & วิเคราะห์ทันที</button>
                     </div>
                 </div>
             )}
-            
             {error && <p className="error-msg">{error}</p>}
         </div>
       )}
-      {/* ---------------- END INPUT SECTION ---------------- */}
 
       {loading && (
           <div className="loader-container">
@@ -471,16 +417,24 @@ function AnalysisPage() {
           {/* Left Column */}
           <div className="results-left">
              <div className="detail-card">
-                <h4>ภาพต้นฉบับ <span style={{fontSize:'0.8rem', color:'#64748b'}}>(แตะกรอบแดงเพื่อดูรายละเอียด)</span></h4>
-                {preview && <InteractiveImage imageUrl={preview} cells={abnormalCells} onCellClick={(cell) => setSelectedCellDetail(cell)} />}
+                <h4>ภาพที่วิเคราะห์ <span style={{fontSize:'0.8rem', color:'#64748b'}}>(แตะกรอบแดงเพื่อดูรายละเอียด)</span></h4>
+                
+                {/* 🔥 FIX: ใช้รูป finalDisplayImage แทน preview 
+                   เพื่อให้รูปสี่เหลี่ยมที่ตัดแล้ว แสดงตรงกับพิกัด Bounding Box
+                */}
+                {finalDisplayImage && (
+                    <InteractiveImage 
+                        imageUrl={finalDisplayImage} 
+                        cells={abnormalCells} 
+                        onCellClick={(cell) => setSelectedCellDetail(cell)} 
+                    />
+                )}
+
              </div>
 
              <div className="detail-card clickable-card" onClick={() => setShowSizeGallery(true)} style={{borderLeft:'5px solid #8b5cf6'}}>
                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                    <div>
-                        <h4 style={{marginBottom:5, border:0, color:'#8b5cf6'}}>Size Analysis Visualization</h4>
-                        <p style={{margin:0, fontSize:'0.85rem', color:'#64748b'}}>ตรวจพบ {sizeData.length} เซลล์ (Size)</p>
-                    </div>
+                    <div><h4 style={{marginBottom:5, border:0, color:'#8b5cf6'}}>Size Analysis Visualization</h4><p style={{margin:0, fontSize:'0.85rem', color:'#64748b'}}>ตรวจพบ {sizeData.length} เซลล์ (Size)</p></div>
                     <span className="arrow-icon">→</span>
                  </div>
                  <div className="mini-gallery">
@@ -493,10 +447,7 @@ function AnalysisPage() {
              {distanceData.length > 0 && (
                  <div className="detail-card clickable-card" onClick={() => setShowDistanceGallery(true)} style={{borderLeft:'5px solid #0ea5e9'}}>
                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                        <div>
-                            <h4 style={{marginBottom:5, border:0, color:'#0ea5e9'}}>Distance Algo Visualization</h4>
-                            <p style={{margin:0, fontSize:'0.85rem', color:'#64748b'}}>ตรวจพบ {distanceData.length} เชื้อ (Algorithm Line)</p>
-                        </div>
+                        <div><h4 style={{marginBottom:5, border:0, color:'#0ea5e9'}}>Distance Algo Visualization</h4><p style={{margin:0, fontSize:'0.85rem', color:'#64748b'}}>ตรวจพบ {distanceData.length} เชื้อ (Algorithm Line)</p></div>
                         <span className="arrow-icon">→</span>
                      </div>
                      <div className="mini-gallery">
@@ -507,31 +458,16 @@ function AnalysisPage() {
                  </div>
              )}
 
-             {chromatinCells.length > 0 && (
-                 <div className="detail-card clickable-card" onClick={() => setShowChromatinGallery(true)}>
-                     <h4>Multi-Chromatin <span style={{color:'#64748b'}}>({chromatinCells.length})</span></h4>
-                 </div>
-             )}
-             {schuffnerCells.length > 0 && (
-                 <div className="detail-card clickable-card" onClick={() => setShowSchuffnerGallery(true)}>
-                     <h4>Schüffner's Dot <span style={{color:'#64748b'}}>({schuffnerCells.length})</span></h4>
-                 </div>
-             )}
-             {basketCells.length > 0 && (
-                 <div className="detail-card clickable-card" onClick={() => setShowBasketGallery(true)}>
-                      <h4>Basket / Band Form <span style={{color:'#64748b'}}>({basketCells.length})</span></h4>
-                 </div>
-             )}
+             {chromatinCells.length > 0 && (<div className="detail-card clickable-card" onClick={() => setShowChromatinGallery(true)}><h4>Multi-Chromatin <span style={{color:'#64748b'}}>({chromatinCells.length})</span></h4></div>)}
+             {schuffnerCells.length > 0 && (<div className="detail-card clickable-card" onClick={() => setShowSchuffnerGallery(true)}><h4>Schüffner's Dot <span style={{color:'#64748b'}}>({schuffnerCells.length})</span></h4></div>)}
+             {basketCells.length > 0 && (<div className="detail-card clickable-card" onClick={() => setShowBasketGallery(true)}><h4>Basket / Band Form <span style={{color:'#64748b'}}>({basketCells.length})</span></h4></div>)}
           </div>
 
           {/* Right Column */}
           <div className="results-right">
              <div className="overall-diagnosis-card">
                 <h4>DIAGNOSIS RESULT</h4>
-                <h2 style={{color: isFalciparum?'#fca5a5': (isVivax?'#86efac': (isMalariae ? '#fdba74' : '#ffffff'))}}>
-                    {overallDiagnosis}
-                </h2>
-                
+                <h2 style={{color: isFalciparum?'#fca5a5': (isVivax?'#86efac': (isMalariae ? '#fdba74' : '#ffffff'))}}>{overallDiagnosis}</h2>
                 <div className="checklist-grid-container">
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '15px' }}>
                       <div className="checklist-column" style={{opacity: isFalciparum ? 1 : 0.4}}>
@@ -556,35 +492,21 @@ function AnalysisPage() {
              </div>
 
              <div className="stats-grid">
-                <div className='detail-card center-text'>
-                    <p>Total Cells</p>
-                    <strong>{totalCells}</strong>
-                </div>
-                <div className='detail-card center-text'>
-                    <p>Abnormal Found</p>
-                    <strong style={{color:'#f59e0b'}}>{abnormalCells.length}</strong>
-                </div>
+                <div className='detail-card center-text'><p>Total Cells</p><strong>{totalCells}</strong></div>
+                <div className='detail-card center-text'><p>Abnormal Found</p><strong style={{color:'#f59e0b'}}>{abnormalCells.length}</strong></div>
              </div>
 
              <div className='detail-card' style={{borderLeft:'5px solid var(--primary)'}}>
                   <h4>Morphometry Analysis</h4>
                   <div style={{marginTop:'15px'}}>
-                      <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px'}}>
-                          <span>Avg Size Ratio (Cell / RBC)</span>
-                          <strong style={{color: parseFloat(avgRatio) > 1.2 ? '#ef4444' : '#10b981'}}>{avgRatio}x</strong>
-                      </div>
-                      <div className="morph-bar-bg">
-                          <div className="morph-bar-fill" style={{ width: `${Math.min(parseFloat(avgRatio) / 2.5 * 100, 100)}%` }}></div>
-                      </div>
-                      <div className="morph-labels">
-                         <span>Normal (1.0x)</span><span>Enlarged (1.5x)</span>
-                      </div>
+                      <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px'}}><span>Avg Size Ratio (Cell / RBC)</span><strong style={{color: parseFloat(avgRatio) > 1.2 ? '#ef4444' : '#10b981'}}>{avgRatio}x</strong></div>
+                      <div className="morph-bar-bg"><div className="morph-bar-fill" style={{ width: `${Math.min(parseFloat(avgRatio) / 2.5 * 100, 100)}%` }}></div></div>
+                      <div className="morph-labels"><span>Normal (1.0x)</span><span>Enlarged (1.5x)</span></div>
                   </div>
              </div>
 
              <div className="action-buttons">
                 <button onClick={()=>window.location.reload()} className="restart-btn">เริ่มใหม่</button>
-                {/* 3. Button Linking Logic */}
                 {isFalciparum && <Link to="/medication-guide/falciparum"><button className="med-btn-red">แนวทางการรักษา (P.f)</button></Link>}
                 {isVivax && <Link to="/medication-guide/vivax"><button className="med-btn-green">แนวทางการรักษา (P.v)</button></Link>}
                 {isMalariae && <Link to="/medication-guide/malariae"><button className="med-btn-orange">แนวทางการรักษา (P.m)</button></Link>}
@@ -593,7 +515,7 @@ function AnalysisPage() {
         </div>
       )}
 
-      {/* GALLERIES */}
+      {/* GALLERIES & MODALS */}
       {showSizeGallery && <SizeGallery title="Size Calculation Results" items={sizeData} onClose={()=>setShowSizeGallery(false)} />}
       {showDistanceGallery && <DistanceGallery title="Distance Algorithm Visualization" items={distanceData} onClose={()=>setShowDistanceGallery(false)} />}
       {showChromatinGallery && <ImageGallery title="Abnormal Chromatin" images={chromatinCells} onClose={()=>setShowChromatinGallery(false)}/>}
@@ -601,149 +523,56 @@ function AnalysisPage() {
       {showBasketGallery && <ImageGallery title="Basket/Band Form" images={basketCells} onClose={()=>setShowBasketGallery(false)}/>}
       {viewingImage && <SingleImageViewer imageUrl={viewingImage} onClose={()=>setViewingImage(null)}/>}
 
-      {/* MODAL รายละเอียดเซลล์ */}
+      {/* CELL DETAIL MODAL */}
       {selectedCellDetail && (
           <div className="modal-overlay" onClick={() => setSelectedCellDetail(null)}>
               <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{textAlign:'center', maxWidth:'900px', padding: '30px'}}>
                   <h3 style={{color:'#ef4444', marginTop:0, marginBottom: '20px'}}>ตรวจพบเชื้อผิดปกติ!</h3>
-                  <div style={{
-                      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '25px'
-                  }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '25px' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>1. Original Detection</p>
                           <div style={{ position: 'relative', width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-                              <img 
-                                src={`${BACKEND_URL}/${selectedCellDetail.url}`} 
-                                alt="Original" 
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                onLoad={(e) => setModalImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
-                              />
+                              <img src={`${BACKEND_URL}/${selectedCellDetail.url}`} alt="Original" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onLoad={(e) => setModalImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })} />
                               {selectedCellDetail.chromatin_bboxes && selectedCellDetail.chromatin_bboxes.map((box, idx) => {
                                   const [x1, y1, x2, y2] = box;
                                   const top = (y1 / modalImgSize.h) * 100;
                                   const left = (x1 / modalImgSize.w) * 100;
                                   const width = ((x2 - x1) / modalImgSize.w) * 100;
                                   const height = ((y2 - y1) / modalImgSize.h) * 100;
-                                  return (
-                                      <div key={idx} style={{
-                                          position: 'absolute', top: `${top}%`, left: `${left}%`, width: `${width}%`, height: `${height}%`,
-                                          border: '2px solid #00ff00', borderRadius: '2px', boxShadow: '0 0 3px rgba(0,0,0,0.5)', pointerEvents: 'none'
-                                      }}></div>
-                                  );
+                                  return (<div key={idx} style={{ position: 'absolute', top: `${top}%`, left: `${left}%`, width: `${width}%`, height: `${height}%`, border: '2px solid #00ff00', borderRadius: '2px', boxShadow: '0 0 3px rgba(0,0,0,0.5)', pointerEvents: 'none' }}></div>);
                               })}
                           </div>
                       </div>
-
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>2. Size Analysis</p>
                           <div style={{ width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               {(() => {
                                   const matched = sizeData.find(item => item.filename === selectedCellDetail.cell);
-                                  return matched && matched.visualization_url ? (
-                                      <img src={`${BACKEND_URL}/${matched.visualization_url}`} alt="Size Viz" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                  ) : <span style={{color:'#94a3b8', fontSize:'0.8rem'}}>No Size Data</span>;
+                                  return matched && matched.visualization_url ? (<img src={`${BACKEND_URL}/${matched.visualization_url}`} alt="Size Viz" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : <span style={{color:'#94a3b8', fontSize:'0.8rem'}}>No Size Data</span>;
                               })()}
                           </div>
                       </div>
-
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <p style={{fontSize:'0.8rem', color:'#64748b', marginBottom:'5px', fontWeight:'600'}}>3. Distance Algorithm</p>
                           <div style={{ width: '100%', aspectRatio: '1', borderRadius: '12px', overflow: 'hidden', border: '2px solid #bae6fd', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {selectedCellDetail.distance_viz_url ? (
-                                  <img src={`${BACKEND_URL}/${selectedCellDetail.distance_viz_url}`} alt="Algo Viz" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              ) : (
-                                  <span style={{color:'#475569', fontSize:'0.8rem'}}>N/A</span>
-                              )}
+                              {selectedCellDetail.distance_viz_url ? (<img src={`${BACKEND_URL}/${selectedCellDetail.distance_viz_url}`} alt="Algo Viz" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (<span style={{color:'#475569', fontSize:'0.8rem'}}>N/A</span>)}
                           </div>
                       </div>
                   </div>
-
                   <div className="modal-info-container">
-                      <p style={{margin:'0 0 15px 0', fontSize:'1.15rem', textAlign: 'center'}}>
-                          <strong>ประเภทเชื้อ:</strong> <span style={{color:'var(--primary)', fontWeight: '700'}}>{selectedCellDetail.characteristic}</span>
-                      </p>
-                      
+                      <p style={{margin:'0 0 15px 0', fontSize:'1.15rem', textAlign: 'center'}}><strong>ประเภทเชื้อ:</strong> <span style={{color:'var(--primary)', fontWeight: '700'}}>{selectedCellDetail.characteristic}</span></p>
                       <div className="modal-analysis-grid-four">
-                          <div className="analysis-box">
-                              <span className="analysis-label">Morphometry</span>
-                              {(() => {
-                                  const matched = sizeData.find(item => item.filename === selectedCellDetail.cell);
-                                  return (
-                                      <div className="analysis-value-wrapper">
-                                          <strong className="analysis-main-value">{matched ? `${matched.size_px} px` : "N/A"}</strong>
-                                          <span className="analysis-sub-value" style={{ color: matched?.ratio > 1.2 ? '#ef4444' : '#10b981' }}>
-                                              ({matched ? `${matched.ratio}x` : "1.0x"})
-                                          </span>
-                                      </div>
-                                  );
-                              })()}
-                          </div>
-
-                          <div className="analysis-box">
-                              <span className="analysis-label">Morphology / Count</span>
-                              {(() => {
-                                  const matched = sizeData.find(item => item.filename === selectedCellDetail.cell);
-                                  const shape = matched?.shape || "Round/Normal";
-                                  const count = selectedCellDetail.chromatin_count || 0;
-                                  const isChromatin = selectedCellDetail.characteristic === '1chromatin';
-                                  return (
-                                      <div style={{display:'flex', flexDirection:'column', alignItems:'center'}}>
-                                          <strong className="analysis-main-value" style={{ color: shape === 'Amoeboid' ? '#8b5cf6' : '#475569' }}>
-                                              {shape}
-                                          </strong>
-                                          {isChromatin && (
-                                              <span style={{fontSize:'0.75rem', color: count > 1 ? '#ef4444' : '#10b981', fontWeight:'600'}}>
-                                                  {count > 1 ? `Multiple (${count})` : `Single (${count})`}
-                                              </span>
-                                          )}
-                                      </div>
-                                  );
-                              })()}
-                          </div>
-
-                          <div className="analysis-box" style={{background: '#f0f9ff', border: '1px solid #bae6fd'}}>
-                              <span className="analysis-label" style={{color: '#0369a1'}}>Distance Pos</span>
-                              {selectedCellDetail.characteristic === '1chromatin' ? (
-                                  <div style={{textAlign:'center'}}>
-                                      <strong className="analysis-main-value" style={{color:'#0c4a6e'}}>
-                                          {(selectedCellDetail.marginal_ratio * 100).toFixed(1)}%
-                                      </strong>
-                                      <p style={{fontSize:'0.65rem', margin:0, color:'#0369a1'}}>
-                                          {selectedCellDetail.marginal_ratio > 0.75 ? "Edge (Appliqué)" : "Internal"}
-                                      </p>
-                                  </div>
-                              ) : <span style={{color:'#94a3b8', fontSize:'0.9rem'}}>N/A</span>}
-                          </div>
-
-                          <div className="analysis-box" style={{background: '#fef2f2', border: '1px solid #fee2e2'}}>
-                              <span className="analysis-label" style={{color: '#b91c1c'}}>Status</span>
-                              {(() => {
-                                  const matched = sizeData.find(item => item.filename === selectedCellDetail.cell);
-                                  const isLarge = matched?.ratio > 1.2;
-                                  const isAmoeboid = matched?.shape === 'Amoeboid';
-                                  const count = selectedCellDetail.chromatin_count || 0;
-                                  const isMulti = count > 1;
-                                  let statusText = "Abnormal";
-                                  if (isLarge && isAmoeboid) statusText = "High Risk (P.v)";
-                                  else if (isMulti) statusText = "Multiple Infection"; 
-                                  else if (isLarge) statusText = "Enlarged RBC";
-                                  else if (isAmoeboid) statusText = "Amoeboid Form";
-                                  return <strong className="analysis-main-value" style={{ color: '#ef4444', fontSize: '0.9rem' }}>{statusText}</strong>;
-                              })()}
-                          </div>
+                          <div className="analysis-box"><span className="analysis-label">Morphometry</span>{(() => {const matched = sizeData.find(item => item.filename === selectedCellDetail.cell); return (<div className="analysis-value-wrapper"><strong className="analysis-main-value">{matched ? `${matched.size_px} px` : "N/A"}</strong><span className="analysis-sub-value" style={{ color: matched?.ratio > 1.2 ? '#ef4444' : '#10b981' }}>({matched ? `${matched.ratio}x` : "1.0x"})</span></div>);})()}</div>
+                          <div className="analysis-box"><span className="analysis-label">Morphology / Count</span>{(() => {const matched = sizeData.find(item => item.filename === selectedCellDetail.cell); const shape = matched?.shape || "Round/Normal"; const count = selectedCellDetail.chromatin_count || 0; const isChromatin = selectedCellDetail.characteristic === '1chromatin'; return (<div style={{display:'flex', flexDirection:'column', alignItems:'center'}}><strong className="analysis-main-value" style={{ color: shape === 'Amoeboid' ? '#8b5cf6' : '#475569' }}>{shape}</strong>{isChromatin && (<span style={{fontSize:'0.75rem', color: count > 1 ? '#ef4444' : '#10b981', fontWeight:'600'}}>{count > 1 ? `Multiple (${count})` : `Single (${count})`}</span>)}</div>);})()}</div>
+                          <div className="analysis-box" style={{background: '#f0f9ff', border: '1px solid #bae6fd'}}><span className="analysis-label" style={{color: '#0369a1'}}>Distance Pos</span>{selectedCellDetail.characteristic === '1chromatin' ? (<div style={{textAlign:'center'}}><strong className="analysis-main-value" style={{color:'#0c4a6e'}}>{(selectedCellDetail.marginal_ratio * 100).toFixed(1)}%</strong><p style={{fontSize:'0.65rem', margin:0, color:'#0369a1'}}>{selectedCellDetail.marginal_ratio > 0.75 ? "Edge (Appliqué)" : "Internal"}</p></div>) : <span style={{color:'#94a3b8', fontSize:'0.9rem'}}>N/A</span>}</div>
+                          <div className="analysis-box" style={{background: '#fef2f2', border: '1px solid #fee2e2'}}><span className="analysis-label" style={{color: '#b91c1c'}}>Status</span>{(() => {const matched = sizeData.find(item => item.filename === selectedCellDetail.cell); const isLarge = matched?.ratio > 1.2; const isAmoeboid = matched?.shape === 'Amoeboid'; const count = selectedCellDetail.chromatin_count || 0; const isMulti = count > 1; let statusText = "Abnormal"; if (isLarge && isAmoeboid) statusText = "High Risk (P.v)"; else if (isMulti) statusText = "Multiple Infection"; else if (isLarge) statusText = "Enlarged RBC"; else if (isAmoeboid) statusText = "Amoeboid Form"; return <strong className="analysis-main-value" style={{ color: '#ef4444', fontSize: '0.9rem' }}>{statusText}</strong>;})()}</div>
                       </div>
-
-                      {selectedCellDetail.bbox && (
-                          <div className="modal-footer-info">
-                            ตำแหน่งพิกัด: X={selectedCellDetail.bbox.x.toFixed(0)}, Y={selectedCellDetail.bbox.y.toFixed(0)}
-                          </div>
-                      )}
+                      {selectedCellDetail.bbox && (<div className="modal-footer-info">ตำแหน่งพิกัด: X={selectedCellDetail.bbox.x.toFixed(0)}, Y={selectedCellDetail.bbox.y.toFixed(0)}</div>)}
                   </div>
                   <button onClick={() => setSelectedCellDetail(null)} className="close-button-alt">ปิดหน้าต่าง</button>
               </div>
           </div>
       )}
-
     </div> 
   );
 }
@@ -755,7 +584,7 @@ function AppWrapper() {
         <Route path="/" element={<AnalysisPage />} /> 
         <Route path="/medication-guide/falciparum" element={<FalciparumGuide />} /> 
         <Route path="/medication-guide/vivax" element={<VivaxGuide />} />
-        <Route path="/medication-guide/malariae" element={<MalariaeGuide />} /> {/* 2. Add Route */}
+        <Route path="/medication-guide/malariae" element={<MalariaeGuide />} />
       </Routes>
     </div>
   );
