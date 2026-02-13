@@ -2,6 +2,7 @@ import os
 import uuid
 import traceback
 import shutil
+import cv2
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from collections import Counter
@@ -11,22 +12,27 @@ from ultralytics import YOLO
 from cellpose_segmenter import segment_and_save_cells, filter_bad_cells
 from image_processor import preprocess_image_with_mask
 from model_loader import load_resnet_model, predict_image_file 
+
+# Import Algorithms
 from algoritum.findsize import process_folder_sizes 
 from algoritum.diastant import calculate_marginal_ratio 
 from algoritum.yolo_counter import count_chromatin_with_yolo
+from algoritum import removebg  # <--- เรียกใช้ไฟล์ตัดพื้นหลัง
 
 app = Flask(__name__)
 CORS(app)
 
-# Setup Folders
+# ================== SETUP FOLDERS ==================
 UPLOAD_FOLDER = 'uploads'
 SEGMENTED_FOLDER = 'segmented_cells'
 PROCESSED_FOLDER = 'processed_results'
+DEBUG_FOLDER = 'debug_crops'  # <--- โฟลเดอร์เก็บรูปที่ตัดแล้ว
 
-for folder in [UPLOAD_FOLDER, SEGMENTED_FOLDER, PROCESSED_FOLDER]:
+# สร้างโฟลเดอร์ให้ครบ
+for folder in [UPLOAD_FOLDER, SEGMENTED_FOLDER, PROCESSED_FOLDER, DEBUG_FOLDER]:
     os.makedirs(folder, exist_ok=True)
 
-# --- Load Models ---
+# ================== LOAD MODELS ==================
 print("🚀 Loading System...")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -44,7 +50,7 @@ except Exception as e:
     print(f"❌ Error loading YOLO model: {e}")
     yolo_model = None
 
-# --- Routes ---
+# ================== ROUTES ==================
 
 @app.route('/uploads/<path:filename>')
 def send_uploaded_image(filename):
@@ -58,7 +64,12 @@ def send_cell_image(path):
 def send_processed_image(path):
     return send_from_directory(PROCESSED_FOLDER, path)
 
-# --- Main API ---
+# Route สำหรับส่งรูปที่ Crop แล้วให้หน้าเว็บ
+@app.route('/debug_crops/<path:filename>')
+def send_debug_image(filename):
+    return send_from_directory(DEBUG_FOLDER, filename)
+
+# ================== MAIN API ==================
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_image():
@@ -69,11 +80,44 @@ def analyze_image():
     filepath = None
     try:
         unique_id = str(uuid.uuid4())
-        filename = unique_id + os.path.splitext(file.filename)[1]
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        # เก็บชื่อไฟล์ดั้งเดิมไว้
+        original_filename = unique_id + os.path.splitext(file.filename)[1]
+        filepath = os.path.join(UPLOAD_FOLDER, original_filename)
         file.save(filepath)
+
+        # ==================================================================================
+        # 0️⃣ Step 0: Remove Background / Crop Square
+        # ==================================================================================
+        print("0️⃣ Preprocessing: Cropping Inner Square...")
         
-        # 1. Segmentation
+        # ตั้งค่า Default URL เป็นรูปต้นฉบับก่อน (เผื่อ Crop ไม่ผ่าน)
+        final_image_url = f"uploads/{original_filename}"
+        
+        try:
+            # 1. ส่งรูปเข้า Algorithm ตัดให้เหลือแค่สี่เหลี่ยมด้านใน
+            cleaned_img_bgr = removebg.process_image(filepath)
+
+            # 2. ตั้งชื่อไฟล์ใหม่ (เติม crop_ ข้างหน้า)
+            cleaned_filename = "crop_" + original_filename
+            cleaned_filepath = os.path.join(DEBUG_FOLDER, cleaned_filename) # เซฟลง debug_crops
+
+            # 3. บันทึกรูปลง Disk
+            cv2.imwrite(cleaned_filepath, cleaned_img_bgr)
+            print(f"✅ Image cropped. Saved at: {cleaned_filepath}")
+
+            # 4. [สำคัญมาก] เปลี่ยน filepath ให้ Pipeline ไปใช้รูปที่ตัดแล้วทำงานต่อ
+            filepath = cleaned_filepath
+            
+            # 5. [สำคัญมาก] เปลี่ยน URL ที่จะส่งกลับหน้าเว็บ ให้เป็นรูปที่ตัดแล้ว
+            # เพื่อให้พิกัด Bounding Box ตรงกับภาพที่แสดง
+            final_image_url = f"debug_crops/{cleaned_filename}"
+
+        except Exception as e:
+            print(f"⚠️ Cropping failed (using original image instead): {e}")
+            # ถ้า Error ก็ใช้ filepath เดิมทำงานต่อ
+        # ==================================================================================
+        
+        # 1. Segmentation (ทำบนรูปที่ Crop แล้ว)
         print(f"1️⃣ Running Cellpose Segmentation...")
         raw_cells_data = segment_and_save_cells(filepath)
         if not raw_cells_data: return jsonify({'message': 'No cells found.', 'success': False})
@@ -103,7 +147,7 @@ def analyze_image():
             bbox = cell_item['bbox']
             cell_filename = os.path.basename(cell_path)
             
-            # Preprocess
+            # Preprocess for ResNet
             temp_masked_path = cell_path.replace(".png", "_temp_mask.png")
             try:
                 masked_img = preprocess_image_with_mask(cell_path)
@@ -123,33 +167,26 @@ def analyze_image():
             marginal_ratio = 0.0
             chromatin_count = 0
             chromatin_bboxes = []
-            distance_viz_url = None # ✨ ตัวแปรเก็บ URL รูป Diagram (สำหรับกล่องที่ 3)
+            distance_viz_url = None 
             
             if predicted_label == '1chromatin':
-                # B1. วัดระยะห่าง + สร้างรูป Diagram
+                # B1. วัดระยะห่าง
                 try:
-                    # ตั้งชื่อไฟล์รูป Viz เช่น cell_123_dist_viz.png
                     dist_viz_filename = cell_filename.replace(".png", "_dist_viz.png")
-                    # กำหนด Path ที่จะบันทึก (บันทึกในโฟลเดอร์เดียวกับรูปเซลล์ที่แยกประเภทแล้ว)
                     dist_viz_path = os.path.join(sorted_base_dir, predicted_label, dist_viz_filename)
                     
-                    # ✨ ส่ง Path ไปให้ฟังก์ชันวาดรูป
                     marginal_ratio = calculate_marginal_ratio(cell_path, save_viz_path=dist_viz_path)
                     
-                    # สร้าง URL สำหรับส่งให้ Frontend (ตรงกับ Route /processed/...)
-                    # รูปแบบ: processed/session_id/sorted_by_morphology/1chromatin/filename
                     distance_viz_url = f"processed/{session_id}/sorted_by_morphology/{predicted_label}/{dist_viz_filename}"
-                    
                 except Exception as e:
                     print(f"Distance calc error: {e}")
 
-                # B2. นับจำนวน + เอาพิกัด (YOLO)
+                # B2. นับจำนวน YOLO
                 if yolo_model is not None:
                     try:
                         count, bboxes = count_chromatin_with_yolo(yolo_model, cell_path)
                         chromatin_count = count
                         chromatin_bboxes = bboxes 
-                        
                         if chromatin_count == 0: chromatin_count = 1
                     except Exception as e:
                         print(f"YOLO error: {e}")
@@ -172,7 +209,7 @@ def analyze_image():
                 "marginal_ratio": marginal_ratio,
                 "chromatin_count": chromatin_count,
                 "chromatin_bboxes": chromatin_bboxes,
-                "distance_viz_url": distance_viz_url, # ✨ ส่ง URL รูป Diagram ไปหน้าเว็บ
+                "distance_viz_url": distance_viz_url,
                 "url": f"cells/{session_id}/{cell_filename}",
                 "bbox": bbox
             })
@@ -212,7 +249,8 @@ def analyze_image():
 
         return jsonify({
             "session_id": session_id,
-            "original_image_url": f"uploads/{filename}",
+            # ส่ง URL ของภาพที่ Crop แล้วกลับไปให้หน้าเว็บแสดงผล (เพื่อให้กรอบแดงตรงตำแหน่ง)
+            "original_image_url": final_image_url, 
             "overall_diagnosis": overall_diagnosis,
             "total_cells_segmented": len(valid_cells_data),
             "vit_characteristics": analysis_results, 
